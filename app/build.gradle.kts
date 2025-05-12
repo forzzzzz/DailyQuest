@@ -4,8 +4,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     id("com.google.devtools.ksp")
-    id ("androidx.navigation.safeargs.kotlin")
-
 }
 
 android {
@@ -20,17 +18,11 @@ android {
         versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
 
-
-        ksp {
-            arg("room.schemaLocation", "$projectDir/schemas")
-        }
-
-        dependenciesInfo {
-            includeInApk = false
-            includeInBundle = false
-        }
-
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 
     buildTypes {
@@ -69,8 +61,8 @@ android {
 
 dependencies {
 
-    implementation ("com.intuit.sdp:sdp-android:1.1.1")
-    implementation ("com.intuit.ssp:ssp-android:1.1.1")
+    implementation (libs.sdp.android)
+    implementation (libs.ssp.android)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
@@ -86,14 +78,9 @@ dependencies {
     ksp(libs.androidx.room.room.compiler)
     annotationProcessor(libs.androidx.room.room.compiler)
     implementation(libs.androidx.room.ktx)
-    implementation(libs.androidx.navigation.fragment)
-    implementation(libs.androidx.navigation.ui)
     implementation(libs.androidx.fragment.ktx)
     implementation(libs.retrofit)
     implementation(libs.converter.gson)
     implementation (libs.okhttp)
     implementation(libs.androidx.webkit)
-
-
-
 }
