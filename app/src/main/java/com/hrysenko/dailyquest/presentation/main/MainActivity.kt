@@ -6,9 +6,12 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.view.ViewGroup
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,7 +44,17 @@ class MainActivity : AppCompatActivity(), MainMenuFragment.OnButtonClickListener
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     settings.cacheMode = WebSettings.LOAD_CACHE_ELSE_NETWORK
-                    webViewClient = WebViewClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun onReceivedError(
+                            view: WebView?,
+                            errorCode: Int,
+                            description: String?,
+                            failingUrl: String?
+                        ) {
+                            super.onReceivedError(view, errorCode, description, failingUrl)
+                            Log.e("WebViewError", "Error $errorCode: $description for $failingUrl")
+                        }
+                    }
                     loadUrl("https://grok.com/")
                 }
             }
@@ -58,87 +71,82 @@ class MainActivity : AppCompatActivity(), MainMenuFragment.OnButtonClickListener
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        requestNotificationPermission()
-        requestActivityRecognitionPermission()
-
         database = AppDatabase.getDatabase(this)
         appDatabase = database
 
-        getSharedWebView(this)
-
+        checkAndRequestPermissions()
         setupBottomNavigation()
 
         if (savedInstanceState == null) {
             loadFragment(MainMenuFragment())
             binding.bottomNavigation.selectedItemId = R.id.main
         }
-
-
-        if (checkActivityRecognitionPermission()) {
-            startService(Intent(this, PedometerService::class.java))
-        }
     }
 
-    private fun requestNotificationPermission() {
+    private fun checkAndRequestPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.POST_NOTIFICATIONS
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    REQUEST_NOTIFICATION_PERMISSION
-                )
+                permissionsToRequest.add(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
-    }
-
-    private fun requestActivityRecognitionPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             if (ContextCompat.checkSelfPermission(
                     this,
                     Manifest.permission.ACTIVITY_RECOGNITION
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.ACTIVITY_RECOGNITION),
-                    REQUEST_ACTIVITY_RECOGNITION_PERMISSION
-                )
+                permissionsToRequest.add(Manifest.permission.ACTIVITY_RECOGNITION)
             }
+        }
+
+        if (permissionsToRequest.isNotEmpty()) {
+            ActivityCompat.requestPermissions(
+                this,
+                permissionsToRequest.toTypedArray(),
+                REQUEST_NOTIFICATION_PERMISSION
+            )
+        } else {
+            startPedometerService()
         }
     }
 
-    private fun checkActivityRecognitionPermission(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACTIVITY_RECOGNITION
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
+    private fun startPedometerService() {
+        try {
+            val intent = Intent(this, PedometerService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("PedometerService", "Failed to start PedometerService: ${e.message}")
+            Toast.makeText(this, "Could not start step counter service.", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun setupBottomNavigation() {
         binding.bottomNavigation.setOnItemSelectedListener { item ->
+            val currentFragment = supportFragmentManager.findFragmentById(R.id.main_fragments)
             when (item.itemId) {
                 R.id.main -> {
-                    loadFragment(MainMenuFragment())
+                    if (currentFragment !is MainMenuFragment) loadFragment(MainMenuFragment())
                     true
                 }
                 R.id.assistant -> {
-                    loadFragment(AssistantFragment())
+                    if (currentFragment !is AssistantFragment) loadFragment(AssistantFragment())
                     true
                 }
                 R.id.dailyQuest -> {
-                    loadFragment(QuestsFragment())
+                    if (currentFragment !is QuestsFragment) loadFragment(QuestsFragment())
                     true
                 }
                 R.id.profile -> {
-                    loadFragment(ProfileFragment())
+                    if (currentFragment !is ProfileFragment) loadFragment(ProfileFragment())
                     true
                 }
                 else -> false
@@ -154,7 +162,10 @@ class MainActivity : AppCompatActivity(), MainMenuFragment.OnButtonClickListener
 
     override fun onDestroy() {
         super.onDestroy()
-        sharedWebView?.destroy()
+        sharedWebView?.let {
+            (it.parent as? ViewGroup)?.removeView(it)
+            it.destroy()
+        }
         sharedWebView = null
     }
 
@@ -169,16 +180,24 @@ class MainActivity : AppCompatActivity(), MainMenuFragment.OnButtonClickListener
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        when (requestCode) {
-            REQUEST_NOTIFICATION_PERMISSION -> {
-
+        if (requestCode == REQUEST_NOTIFICATION_PERMISSION) {
+            val activityRecognitionGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACTIVITY_RECOGNITION
+                ) == PackageManager.PERMISSION_GRANTED
+            } else {
+                true
             }
-            REQUEST_ACTIVITY_RECOGNITION_PERMISSION -> {
-                if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                    startService(Intent(this, PedometerService::class.java))
-                } else {
 
-                }
+            if (activityRecognitionGranted) {
+                startPedometerService()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Activity recognition permission denied. Step counting will not work.",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }

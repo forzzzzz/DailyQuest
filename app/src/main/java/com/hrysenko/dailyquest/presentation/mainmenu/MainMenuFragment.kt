@@ -31,6 +31,7 @@ class MainMenuFragment : Fragment() {
     private var callback: OnButtonClickListener? = null
     private var bmiDialog: androidx.appcompat.app.AlertDialog? = null
     private lateinit var stepsReceiver: BroadcastReceiver
+    private var isStepsReceiverRegistered = false
 
     interface OnButtonClickListener {
         fun onCheckButtonClick()
@@ -63,11 +64,40 @@ class MainMenuFragment : Fragment() {
         }
 
         loadUserData()
+        updateStepsAndCaloriesUI()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateStepsAndCaloriesUI()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (isStepsReceiverRegistered) {
+            requireContext().unregisterReceiver(stepsReceiver)
+            isStepsReceiverRegistered = false
+        }
+    }
+
+    private fun updateStepsAndCaloriesUI() {
         if (checkActivityRecognitionPermission()) {
-            loadSteps()
-            setupStepsReceiver()
+            loadStepsAndCalories()
+            loadQuestProgress()
+            if (!isStepsReceiverRegistered) {
+                setupStepsReceiver()
+                isStepsReceiverRegistered = true
+            }
         } else {
             binding.stepsCount.text = "N/A"
+            binding.caloriesCount.text = "N/A"
+            binding.progressCount.text = "0%"
+            binding.dailyProgressBar.progress = 0
+            Toast.makeText(
+                requireContext(),
+                "Please grant activity recognition permission to count steps.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -86,7 +116,10 @@ class MainMenuFragment : Fragment() {
         stepsReceiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 val steps = intent?.getIntExtra(PedometerService.EXTRA_STEPS, 0) ?: 0
+                val calories = intent?.getDoubleExtra(PedometerService.EXTRA_CALORIES, 0.0) ?: 0.0
                 binding.stepsCount.text = steps.toString()
+                binding.caloriesCount.text = String.format("%.0f", calories)
+                loadQuestProgress()
             }
         }
         val filter = IntentFilter(PedometerService.STEP_UPDATE_ACTION)
@@ -97,7 +130,7 @@ class MainMenuFragment : Fragment() {
                 requireContext(),
                 stepsReceiver,
                 filter,
-                ContextCompat.RECEIVER_NOT_EXPORTED
+                Context.RECEIVER_NOT_EXPORTED
             )
         }
     }
@@ -152,8 +185,16 @@ class MainMenuFragment : Fragment() {
         }
     }
 
-    private fun loadSteps() {
+    private fun loadStepsAndCalories() {
         binding.stepsCount.text = PedometerService.getCurrentSteps().toString()
+        binding.caloriesCount.text = String.format("%.0f", PedometerService.getCurrentCalories())
+    }
+
+    private fun loadQuestProgress() {
+        val preferences = requireContext().getSharedPreferences("DailyQuestPrefs", Context.MODE_PRIVATE)
+        val progressPercentage = preferences.getInt("quest_progress_percentage", 0)
+        binding.progressCount.text = "$progressPercentage%"
+        binding.dailyProgressBar.progress = progressPercentage
     }
 
     private fun getBMICategory(bmi: Double): String = when {
@@ -205,8 +246,9 @@ class MainMenuFragment : Fragment() {
     override fun onDestroyView() {
         bmiDialog?.dismiss()
         bmiDialog = null
-        if (::stepsReceiver.isInitialized) {
+        if (isStepsReceiverRegistered) {
             requireContext().unregisterReceiver(stepsReceiver)
+            isStepsReceiverRegistered = false
         }
         super.onDestroyView()
         _binding = null
